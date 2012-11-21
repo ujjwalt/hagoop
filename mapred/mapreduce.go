@@ -2,8 +2,9 @@
 package mapred
 
 import (
-	"/worker"
 	"errors"
+	"fmt"
+	"github.com/ujjwalt/hagoop/mapred/worker"
 	"os"
 )
 
@@ -18,7 +19,6 @@ type MapInput map[id]id
 // Result of the mapreduce computations which includes the result
 type MapReduceResult struct {
 	Result map[id]id
-	// TODO add stats
 }
 
 // Intermediate key-value pairs that are emitted
@@ -38,7 +38,7 @@ type ReduceFunc func(in <-chan reduceInput, out <-chan id) error
 
 // the mapreduce specification object
 type Specs struct {
-	// A slice of input and output file names
+	// A slice of input and output file paths
 	InputFiles, OutputFiles []string
 	// Total number of mappers and reducers to use
 	M, R uint
@@ -50,6 +50,7 @@ type Specs struct {
 	    slice containing one or more Workers is an error!
 	*/
 	Network string
+	// The length of this slice is >= M+R
 	Workers []Worker
 }
 
@@ -87,7 +88,37 @@ const (
 	failed
 )
 
+// default chunk size is 64MB
+const defaultChunkSize = 1 << 16
+
 // The MapReduce() call that triggers off the magic
-func MapReduce(specObj Specs, mapFunc MapFunc, reduceFunc ReduceFunc) (result MapReduceResult, err error) {
-	// TODO Implement the library
+func MapReduce(specs Specs, mapFunc MapFunc, reduceFunc ReduceFunc) (result MapReduceResult, err error) {
+	// Validate the specs
+	validateSpecsObject(specs)
+	if specs.Network {
+		// Populate the hosts slice of specs based on the network
+		total := specs.M + specs.R
+		hostChan := make(chan Worker, total)
+		err = populateHosts(specs, hostChan)
+		if err != nil {
+			return
+		}
+		for w := range hostChan {
+			// loop until hostChan is closed and we have enough workers
+			append(specs.Workers, w)
+		}
+	}
+
+	// Assign the work to all the hosts
+}
+
+func validateSpecsObject(specs Specs) error {
+	if specs.Network && specs.OutputFiles {
+		return fmt.Errorf("Specs object has both a network address: %s as well as a slice of hosts supplied: %v", specs.Network, specs.OutputFiles)
+	}
+	return nil
+}
+
+func populateHosts(specs Specs, hostChan chan Worker) error {
+	// Populate Workers from specs.Network until the num of workers is >= M+R
 }
