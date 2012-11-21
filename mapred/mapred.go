@@ -5,7 +5,23 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ujjwalt/hagoop/mapred/worker"
+	"net"
 	"os"
+)
+
+// Defines wether a worker is a mapworker, reduce worker or the master
+const (
+	mapWorker = iota
+	reduceWorker
+	master
+)
+
+// State of a host
+const (
+	idle = iota
+	inProgress
+	completed
+	failed
 )
 
 // Renaming the generic type - id from objective-c
@@ -33,6 +49,9 @@ type ReduceInput map[id]chan id
 // The map function to be provided by the user
 type MapFunc func(in <-chan MapInput, emit chan<- Intermediate) error
 
+// The input parser which reads a slice of bytes and generates a MapInput
+type InputParser func(data []byte) (input MapInput, err error)
+
 // the reduce function - provided by the user
 type ReduceFunc func(in <-chan reduceInput, out <-chan id) error
 
@@ -52,12 +71,17 @@ type Specs struct {
 	Network string
 	// The length of this slice is >= M+R
 	Workers []Worker
+
+	// Functions
+	inputReader InputParser
+	mapFunc     MapFunc
+	reduceFunc  ReduceFunc
 }
 
 // Represents a machine in the cluster
 type Worker struct {
 	// The IP address of the host
-	IPAddr string
+	IPAddr net.Addr
 	// Port on which the host is listening
 	Port uint16
 	// Tasks assigned to the host
@@ -73,26 +97,11 @@ type Task struct {
 	state int
 }
 
-// Defines wether a worker is a mapworker, reduce worker or the master
-const (
-	mapWorker = iota
-	reduceWorker
-	master
-)
-
-// State of a host
-const (
-	idle = iota
-	inProgress
-	completed
-	failed
-)
-
 // default chunk size is 64MB
 const defaultChunkSize = 1 << 16
 
 // The MapReduce() call that triggers off the magic
-func MapReduce(specs Specs, mapFunc MapFunc, reduceFunc ReduceFunc) (result MapReduceResult, err error) {
+func MapReduce(specs Specs) (result MapReduceResult, err error) {
 	// Validate the specs
 	validateSpecsObject(specs)
 	if specs.Network {
