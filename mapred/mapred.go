@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ujjwalt/hagoop/mapred/worker"
+	"io"
 	"net"
 	"os"
 )
@@ -24,36 +25,43 @@ const (
 	failed
 )
 
-// Renaming the generic type - id from objective-c
-type id interface{}
+// Renaming the generic type - Id from objective-c
+type Id interface{}
 
-// Give input as a map instead of individual key-value pairs to reduce the overhead of function calls
+// Give input as a map instead of indivIdual key-value pairs to reduce the overhead of function calls
 // and accomodate as many key-value pairs as possible in a single function call. How many? That's left
-// to the user to decide
-type MapInput map[id]id
+// to the user to decIde
+type MapInput map[Id]Id
 
 // Result of the mapreduce computations which includes the result
 type MapReduceResult struct {
-	Result map[id]id
+	Result map[Id]Id
 }
 
 // Intermediate key-value pairs that are emitted
 type Intermediate struct {
-	Key, Value id
+	Key, Value Id
 }
 
 // We use a channel to be able to iterate over the values as and when they are available. This allows
 // very large lists to be handled since only as many items are sent through the channel as can fit in memory.
-type ReduceInput map[id]chan id
+type ReduceInput map[Id]chan Id
 
-// The map function to be provided by the user
+// The map function to be provIded by the user
 type MapFunc func(in <-chan MapInput, emit chan<- Intermediate) error
 
-// The input parser which reads a slice of bytes and generates a MapInput
-type InputParser func(data []byte) (input MapInput, err error)
+// The Reader should read in bytes of chunksize and returns a channel of MapInput
+type Reader interface {
+	Read(chunk []byte) (chan MapInput, error)
+}
 
-// the reduce function - provided by the user
-type ReduceFunc func(in <-chan reduceInput, out <-chan id) error
+// The Writer should read in bytes of chunksize and returns a channel of ReduceInput
+type Writer interface {
+	Write(chunk []byte) error
+}
+
+// the reduce function - provIded by the user
+type ReduceFunc func(in <-chan reduceInput, out <-chan Id) error
 
 // the mapreduce specification object
 type Specs struct {
@@ -73,7 +81,7 @@ type Specs struct {
 	Workers []Worker
 
 	// Functions
-	inputReader InputParser
+	inputReader Reader
 	mapFunc     MapFunc
 	reduceFunc  ReduceFunc
 }
@@ -102,14 +110,14 @@ const defaultChunkSize = 1 << 16
 
 // The MapReduce() call that triggers off the magic
 func MapReduce(specs Specs) (result MapReduceResult, err error) {
-	// Validate the specs
-	validateSpecsObject(specs)
+	// ValIdate the specs
+	if err = valIdateSpecsObject(specs); err != nil {
+		return
+	}
 	if specs.Network {
 		// Populate the hosts slice of specs based on the network
-		total := specs.M + specs.R
-		hostChan := make(chan Worker, total)
-		err = populateHosts(specs, hostChan)
-		if err != nil {
+		hostChan := make(chan Worker, specs.M+specs.R)
+		if err = populateHosts(specs, hostChan); err != nil {
 			return
 		}
 		for w := range hostChan {
@@ -121,9 +129,14 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 	// Assign the work to all the hosts
 }
 
-func validateSpecsObject(specs Specs) error {
-	if specs.Network && specs.OutputFiles {
-		return fmt.Errorf("Specs object has both a network address: %s as well as a slice of hosts supplied: %v", specs.Network, specs.OutputFiles)
+func valIdateSpecsObject(specs Specs) error {
+	// Only one of them should be set
+	if !(specs.Network ^ specs.Workers) {
+		return fmt.Errorf("Specs object should have either a network address: %s or a slice of hosts: %v, not both!", specs.Network, specs.Workers)
+	}
+	// If []Workers is set then M+R >= num of Workers
+	if specs.Workers && specs.M+specs.R < len(specs.Workers) {
+		return fmt.Errorf("M: %d & R: %d are less than the num of hosts: %d", specs.M, specs.R, len(specs.Workers))
 	}
 	return nil
 }
