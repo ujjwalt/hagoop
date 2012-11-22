@@ -92,10 +92,6 @@ type Worker struct {
 	tasks []Task
 }
 
-type Mapper interface {
-	LocationsAndSizes() (locations []string, sizes []uint64)
-}
-
 type Task struct {
 	// State of the host
 	state int
