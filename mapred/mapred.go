@@ -2,12 +2,8 @@
 package mapred
 
 import (
-	"errors"
 	"fmt"
-	"github.com/ujjwalt/hagoop/mapred/worker"
-	"io"
 	"net"
-	"os"
 )
 
 // Defines wether a worker is a mapworker, reduce worker or the master
@@ -61,7 +57,7 @@ type Writer interface {
 }
 
 // the reduce function - provIded by the user
-type ReduceFunc func(in <-chan reduceInput, out <-chan Id) error
+type ReduceFunc func(in <-chan ReduceInput, out <-chan Id) error
 
 // the mapreduce specification object
 type Specs struct {
@@ -114,7 +110,7 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 	if err = valIdateSpecsObject(specs); err != nil {
 		return
 	}
-	if specs.Network {
+	if specs.Network != "" {
 		// Populate the hosts slice of specs based on the network
 		hostChan := make(chan Worker, specs.M+specs.R)
 		if err = populateHosts(specs, hostChan); err != nil {
@@ -122,20 +118,23 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 		}
 		for w := range hostChan {
 			// loop until hostChan is closed and we have enough workers
-			append(specs.Workers, w)
+			specs.Workers = append(specs.Workers, w)
 		}
 	}
 
 	// Assign the work to all the hosts
+	return
 }
 
 func valIdateSpecsObject(specs Specs) error {
 	// Only one of them should be set
-	if !(specs.Network ^ specs.Workers) {
+	validNetwork := specs.Network != ""
+	validWorkers := specs.Workers != nil
+	if !((validNetwork && !validWorkers) || (!validNetwork && validWorkers)) {
 		return fmt.Errorf("Specs object should have either a network address: %s or a slice of hosts: %v, not both!", specs.Network, specs.Workers)
 	}
 	// If []Workers is set then M+R >= num of Workers
-	if specs.Workers && specs.M+specs.R < len(specs.Workers) {
+	if validWorkers && specs.M+specs.R < uint(len(specs.Workers)) {
 		return fmt.Errorf("M: %d & R: %d are less than the num of hosts: %d", specs.M, specs.R, len(specs.Workers))
 	}
 	return nil
@@ -143,4 +142,5 @@ func valIdateSpecsObject(specs Specs) error {
 
 func populateHosts(specs Specs, hostChan chan Worker) error {
 	// Populate Workers from specs.Network until the num of workers is >= M+R
+	return nil
 }

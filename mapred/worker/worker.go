@@ -1,8 +1,7 @@
 // Represents a worker on a host machine that provides services for doing map and reduce work
-package worker
+package mapred
 
 import (
-	. "github.com/ujjwalt/hagoop/mapred"
 	"net/rpc"
 )
 
