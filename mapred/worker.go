@@ -24,7 +24,7 @@ type MapArgs struct {
 
 // Arguments for a reduce work
 type ReduceArgs struct {
-	in      <-chan reduceInput
+	in      <-chan ReduceInput
 	out     <-chan Id
 	redFunc ReduceFunc
 }
