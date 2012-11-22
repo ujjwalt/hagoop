@@ -19,7 +19,7 @@ const (
 	failed
 )
 
-// default chunk size is 64MB
+// Default chunk size is 16MB
 const defaultChunkSize uint64 = 1 << 14
 
 // Renaming the generic type - id from objective-c
@@ -106,7 +106,7 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 	clients := make([]*rpc.Client, totalWorkers) // clients returned by rpc calls
 	calls := make([]*rpc.Call, totalWorkers)     // calls returned by rpc calls
 	unit := totalWorkers / (specs.M + specs.R)   // unit worker for ratios
-	ans := make([]*bool, totalWorkers)
+	ans := make([]bool, totalWorkers)
 	m := int(unit * specs.M) // number of map workers
 	r := int(unit * specs.R) // number of reduce workers
 	dialFailures := 0        // number of dial failure - max limit is
@@ -120,7 +120,7 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 				return // Return if number of dial failures are too many
 			}
 		}
-		calls[i] = clients[i].Go(idleService, myAddr, ans[i], nil) // Call the service method to ask if the host is idle
+		calls[i] = clients[i].Go(idleService, myAddr, &ans[i], nil) // Call the service method to ask if the host is idle
 	}
 
 	err = nil // Reset err
