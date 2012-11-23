@@ -117,6 +117,10 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 	// Accept the first m map workers which reply yes
 	var done [m]bool
 	signalCompletion := make(chan bool, 2) // to signal completion of accept for m & r
+	// Pointers to map and reduce workers to get faster access to them
+	mapWorkers := make([]*worker, m)
+	reduceWorkers := make([]*worker, r)
+	// A function accept te first n workers. Value of n is used to check if its for mappers or reducers
 	accept := func(n int) {
 		var i, acceptedWorkers = 0, 0
 		// loop unitl we have covered all clients or got m accepted workers
@@ -126,12 +130,14 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 				// Assign the task
 				switch n {
 				case m:
-					specs.Workers[acceptedWorkers].task = MapTask{idle, split[acceptedWorkers], specs.R}
+					specs.Workers[i].task = MapTask{idle, split[acceptedWorkers], specs.R}
+					mapWorkers[acceptedWorkers] = &specs.Workers[i]
 				case r:
-					specs.Workers[acceptedWorkers].task = ReduceTask{idle}
+					specs.Workers[i].task = ReduceTask{idle}
+					reduceWorkers[acceptedWorkers] = &specs.Workers[i]
 				}
-				specs.Workers[acceptedWorkers].client = clients[i] // Assign the client
-				done[i] = true                                     // mark caller as accepted
+				specs.Workers[i].client = clients[i] // Assign the client
+				done[i] = true                       // mark caller as accepted
 				acceptedWorkers++
 			default:
 			}
@@ -144,12 +150,12 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 	}
 	go accept(m)
 	go accept(r)
-	if !<-signalCompletion || !<-signalCompletion {
+	if <-signalCompletion && <-signalCompletion {
 		err = fmt.Errorf("Could not gather enough hosts to work. M: %d, R: %d", m, r)
 		return
 	}
 
-	// Now that we have
+	// Now that we have workers
 
 	err = nil // Reset err
 	return
