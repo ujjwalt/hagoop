@@ -51,10 +51,6 @@ type Specs struct {
 	// Size of each split.
 	// This should determined on the basis of the type of the underlying filesystem.
 	ChunkSize uint64
-	// The workers can either be supplied as a slice of worker structs or as a network address on which a "Worker.Idle" request
-	// is broadcasted. Sorkers which reply in the affirmative are assigned. Setting both a network address as well as a host
-	// slice containing one or more workers is an error.
-	Network string
 	// The length of this slice should be >= M+R
 	Workers []worker
 }
@@ -65,6 +61,10 @@ type worker struct {
 	Addr net.TCPAddr
 	// Task assigned to the worker
 	task id
+	// RPC cient for communication
+	client *rpc.Client
+	// Answers to queries
+	ans map[id]id // TODO type needs to be changed later
 }
 
 // Task consists of the current state of the task, the split assigned to it if it is a map task
@@ -88,40 +88,68 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 	if err = validateSpecs(specs); err != nil {
 		return
 	}
-	if specs.Network != "" {
-		// Populate the hosts slice of specs based on the network
-		var hostChan chan worker
-		if hostChan, err = populateHosts(specs); err != nil {
-			return
-		}
-		for w := range hostChan {
-			// loop until hostChan is closed and we have enough workers
-			specs.Workers = append(specs.Workers, w)
-		}
-	}
 
 	// Determine the total size of the all input files and start splitting it. Assign each split to a worker as a map task
 	// and assign a reduce task to the rest of the workers in a ratio of M:R
 	totalWorkers := uint(len(specs.Workers))     // total workers
 	clients := make([]*rpc.Client, totalWorkers) // clients returned by rpc calls
+	splits := make([]os.File, specs.M)           // Splits of files
 	calls := make([]*rpc.Call, totalWorkers)     // calls returned by rpc calls
 	unit := totalWorkers / (specs.M + specs.R)   // unit worker for ratios
-	ans := make([]bool, totalWorkers)
-	m := int(unit * specs.M) // number of map workers
-	r := int(unit * specs.R) // number of reduce workers
-	dialFailures := 0        // number of dial failure - max limit is
+	ans := make([]bool, totalWorkers)            // answers received from machines wether they are idle or not?
+	m := int(unit * specs.M)                     // number of map workers
+	r := totalWorkers - m                        // number of reduce workers
+	dialFailures := 0                            // number of dial failure - max limit is
 	myAddr := myTCPAddr()
+
 	for i := 0; i < m+r; i++ {
 		clients[i], err = rpc.DialHTTP("tcp", specs.Workers[i].Addr.String())
 		if err != nil {
 			dialFailures++
-			if dialFailures > m/2 {
-				err = fmt.Errorf("Number of dial failures is more than %d", m/2)
+			if dialFailures > totalWorkers/2 {
+				err = fmt.Errorf("Number of dial failures is more than %d", totalWorkers/2)
 				return // Return if number of dial failures are too many
 			}
 		}
 		calls[i] = clients[i].Go(idleService, myAddr, &ans[i], nil) // Call the service method to ask if the host is idle
 	}
+
+	// Accept the first m map workers which reply yes
+	var done [m]bool
+	signalCompletion := make(chan bool, 2) // to signal completion of accept for m & r
+	accept := func(n int) {
+		var i, acceptedWorkers = 0, 0
+		// loop unitl we have covered all clients or got m accepted workers
+		for ; acceptedWorkers < n; i = (i + 1) % totalWorkers {
+			select {
+			case <-calls[i].Done && !done[i]:
+				// Assign the task
+				switch n {
+				case m:
+					specs.Workers[acceptedWorkers].task = MapTask{idle, split[acceptedWorkers], specs.R}
+				case r:
+					specs.Workers[acceptedWorkers].task = ReduceTask{idle}
+				}
+				specs.Workers[acceptedWorkers].client = clients[i] // Assign the client
+				done[i] = true                                     // mark caller as accepted
+				acceptedWorkers++
+			default:
+			}
+		}
+		if acceptedWorkers == n {
+			signalCompletion <- true
+		} else {
+			signalCompletion <- false
+		}
+	}
+	go accept(m)
+	go accept(r)
+	if !<-signalCompletion || !<-signalCompletion {
+		err = fmt.Errorf("Could not gather enough hosts to work. M: %d, R: %d", m, r)
+		return
+	}
+
+	// Now that we have
 
 	err = nil // Reset err
 	return
@@ -143,14 +171,6 @@ func validateSpecs(specs Specs) error {
 		specs.ChunkSize = defaultChunkSize
 	}
 	return nil
-}
-
-func populateHosts(specs Specs) (hostChan chan worker, err error) {
-	// Populate workers from specs.Network by broadcasting an "Worker.Idle" message until the num of workers is >= M+R
-	// TODO implement later
-	// hostChan := make(chan worker, specs.M+specs.R)
-	err = fmt.Errorf("Providing Network is not supported by the package right now")
-	return
 }
 
 // Converts a bool to int
