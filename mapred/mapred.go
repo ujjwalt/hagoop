@@ -136,6 +136,7 @@ func bToi(b bool) int {
 func myTCPAddr() (a *net.TCPAddr, err error) {
 	// Return own ip address used for the connections by dialing to http://www.google.com
 	c, err := net.Dial("tcp", "google.com:80")
+	defer c.Close()
 	if err != nil {
 		return
 	}

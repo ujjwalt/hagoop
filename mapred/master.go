@@ -40,7 +40,7 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 				return // Return if number of dial failures are too many
 			}
 		}
-		calls[i] = clients[i].Go(idleService, myAddr, &ans[i], nil) // Call the service method to ask if the host is idle
+		calls[i] = clients[i].Go(idleService, *myAddr, &ans[i], nil) // Call the service method to ask if the host is idle
 	}
 
 	// Accept the first m map workers which reply yes
@@ -95,7 +95,7 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 		}
 		for _, rw := range reduceWorkers {
 			if rw.task.(ReduceTask).state == idle {
-				rw.client.Go(MapService, rw.task, nil, nil) // Ask to do the map work
+				rw.client.Go(ReduceService, rw.task, nil, nil) // Ask to do the map work
 			}
 		}
 
@@ -156,9 +156,8 @@ func split(chunkS uint64, files []string) (splits []string, err error) {
 		fHandle, err = os.Open(files[i])
 		if err != nil {
 			return
-		} else {
-			defer fHandle.Close()
 		}
+		defer fHandle.Close()
 		// Read chunkS bytes into splits[i]
 	tryAgain:
 		r, err = fHandle.ReadAt(b[read:chunkS], off) // Read chunkS bytes into b
