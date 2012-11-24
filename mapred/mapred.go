@@ -11,12 +11,36 @@ import (
 // State of a worker
 type state int
 
+// Type of this host
+type wType int
+
 // State of a host
 const (
 	idle state = iota
 	inProgress
 	completed
 	failed
+)
+
+const (
+	master wType = iota
+	mapper
+	reducer
+)
+
+const (
+	port          = ":2607" // All communication happens over this port
+	idleService   = "Service.Idle"
+	MapService    = "Service.Map"
+	ReduceService = "Service.Reduce"
+)
+
+var (
+	started    bool         // Indicates wether the service has staretd
+	l          net.Listener // The service listener
+	masterAddr net.TCPAddr  // Address of the master
+	task       id           // Current task
+	w          *Worker      //The object to use as worker
 )
 
 // Default chunk size is 16MB
@@ -82,112 +106,18 @@ type ReduceTask struct {
 	state state
 }
 
-// The MapReduce() call that triggers off the magic
-func MapReduce(specs Specs) (result MapReduceResult, err error) {
-	// Validate the specs
-	if err = validateSpecs(specs); err != nil {
-		return
-	}
-
-	// Determine the total size of the all input files and start splitting it. Assign each split to a worker as a map task
-	// and assign a reduce task to the rest of the workers in a ratio of M:R
-	totalWorkers := uint(len(specs.Workers))     // total workers
-	clients := make([]*rpc.Client, totalWorkers) // clients returned by rpc calls
-	splits := make([]os.File, specs.M)           // Splits of files
-	calls := make([]*rpc.Call, totalWorkers)     // calls returned by rpc calls
-	unit := totalWorkers / (specs.M + specs.R)   // unit worker for ratios
-	ans := make([]bool, totalWorkers)            // answers received from machines wether they are idle or not?
-	m := int(unit * specs.M)                     // number of map workers
-	r := totalWorkers - m                        // number of reduce workers
-	dialFailures := 0                            // number of dial failure - max limit is
-	myAddr := myTCPAddr()
-
-	for i := 0; i < m+r; i++ {
-		clients[i], err = rpc.DialHTTP("tcp", specs.Workers[i].Addr.String())
-		if err != nil {
-			dialFailures++
-			if dialFailures > totalWorkers/2 {
-				err = fmt.Errorf("Number of dial failures is more than %d", totalWorkers/2)
-				return // Return if number of dial failures are too many
-			}
-		}
-		calls[i] = clients[i].Go(idleService, myAddr, &ans[i], nil) // Call the service method to ask if the host is idle
-	}
-
-	// Accept the first m map workers which reply yes
-	var done [m]bool
-	signalCompletion := make(chan bool, 2) // to signal completion of accept for m & r
-	// Pointers to map and reduce workers to get faster access to them
-	mapWorkers := make([]*worker, m)
-	reduceWorkers := make([]*worker, r)
-	// A function accept te first n workers. Value of n is used to check if its for mappers or reducers
-	accept := func(n int) {
-		var i, acceptedWorkers = 0, 0
-		// loop unitl we have covered all clients or got m accepted workers
-		for ; acceptedWorkers < n; i = (i + 1) % totalWorkers {
-			select {
-			case <-calls[i].Done && !done[i]:
-				// Assign the task
-				switch n {
-				case m:
-					specs.Workers[i].task = MapTask{idle, split[acceptedWorkers], specs.R}
-					mapWorkers[acceptedWorkers] = &specs.Workers[i]
-				case r:
-					specs.Workers[i].task = ReduceTask{idle}
-					reduceWorkers[acceptedWorkers] = &specs.Workers[i]
-				}
-				specs.Workers[i].client = clients[i] // Assign the client
-				done[i] = true                       // mark caller as accepted
-				acceptedWorkers++
-			default:
-			}
-		}
-		if acceptedWorkers == n {
-			signalCompletion <- true
-		} else {
-			signalCompletion <- false
-		}
-	}
-	go accept(m)
-	go accept(r)
-	if <-signalCompletion && <-signalCompletion {
-		err = fmt.Errorf("Could not gather enough hosts to work. M: %d, R: %d", m, r)
-		return
-	}
-
-	// Now that we have workers
-
-	err = nil // Reset err
-	return
+// Worker is an inteface that defines the behaviour required by the application.
+// It is important that these methods are defined on a pointer for the rpc mechanism to work.
+// A Worker object is passed to Start() to start providing the service
+type Worker interface {
+	// Read takes as input a byte slice, converts it into a MapInput and returns it back
+	Read([]byte) (MapInput, error)
+	// Map is the map function which takes a channel of MapInput and emits
+	// the Intermediate key-value pairs for every key-value pair of MapInput through the channel
+	// returned by it.
+	Map(<-chan MapInput) (<-chan Intermediate, error)
+	//Reduce is the reduce function which takes a channel of ReduceInput and an output channel to transfer
+	Reduce(<-chan ReduceInput) (<-chan id, error)
 }
 
-func validateSpecs(specs Specs) error {
-	// Only one of them should be set
-	validNetwork := bToi(specs.Network != "")
-	validWorkers := bToi(specs.Workers != nil)
-	if validNetwork^validWorkers != 0 {
-		return fmt.Errorf("Specs object should have either a network address: %s or a slice of hosts: %v, not both!", specs.Network, specs.Workers)
-	}
-	// If []workers is set then M+R >= num of workers
-	if validWorkers != 0 && specs.M+specs.R < uint(len(specs.Workers)) {
-		return fmt.Errorf("M: %d & R: %d are less than the num of hosts: %d", specs.M, specs.R, len(specs.Workers))
-	}
-	// If the chunk size specified is less than 16Mb then set it to 16Mb
-	if specs.ChunkSize < defaultChunkSize {
-		specs.ChunkSize = defaultChunkSize
-	}
-	return nil
-}
-
-// Converts a bool to int
-func bToi(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-func myTCPAddr() net.TCPAddr {
-	// Return own ip address used for the connections
-	return net.TCPAddr{}
-}
+type Service struct{}
