@@ -137,7 +137,7 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 		// loop unitl we have covered all clients or got m accepted workers
 		for ; aw < n; i = (i + 1) % totalWorkers {
 			select {
-			case <-calls[i].Done && !done[i]:
+			case !done[i] && <-calls[i].Done:
 				// Assign the task
 				switch n {
 				case m:
