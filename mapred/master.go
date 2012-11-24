@@ -1,5 +1,12 @@
 package mapred
 
+import (
+	"io"
+	"net"
+	"os"
+	"path"
+)
+
 // The MapReduce() call that triggers off the magic
 func MapReduce(specs Specs) (result MapReduceResult, err error) {
 	// Validate the specs
@@ -54,11 +61,9 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 				case m:
 					specs.Workers[i].task = MapTask{idle, split[aw], specs.R} // Setup the worker
 					mapWorkers[aw] = &specs.Workers[i]                        // Assign reference to mapWorkers
-					clients[aw].Go(MapService, mapWorkers[aw].task, nil, nil) // Ask to do the map work
 				case r:
 					specs.Workers[i].task = ReduceTask{idle}
 					reduceWorkers[aw] = &specs.Workers[i]
-					clients[aw].Go(ReduceService, reduceWorkers[aw].task, nil, nil)
 				}
 				specs.Workers[i].client = clients[i] // Assign the client
 				done[i] = true                       // mark caller as accepted
@@ -77,6 +82,24 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 	if <-signalCompletion && <-signalCompletion {
 		err = fmt.Errorf("Could not gather enough hosts to work. M: %d, R: %d", m, r)
 		return
+	}
+
+	// keep looping until all are done
+	for {
+		// Ask each of them to perform their duty
+		for _, mw := range mapWorkers {
+			if mw.task.(MapTask).state == idle {
+				mw.client.Go(MapService, mw.task, nil, nil) // Ask to do the map work
+			}
+
+		}
+		for _, rw := range reduceWorkers {
+			if rw.task.(ReduceTask).state == idle {
+				rw.client.Go(MapService, rw.task, nil, nil) // Ask to do the map work
+			}
+		}
+
+		// wait for a reply from map workers
 	}
 
 	err = nil // Reset err
@@ -122,15 +145,52 @@ func setUpMasterServices() error {
 	return nil
 }
 
-// Converts a bool to int
-func bToi(b bool) int {
-	if b {
-		return 1
+// Split files into chunks of size chunkS and return the file handles
+func split(chunkS uint64, files []string) (splits []string, err error) {
+	// name each intermediate file based on the hash of the contents of the input file
+	var fHandle, splitN os.File
+	var tmp = os.TempDir()
+	var b [chunkS]byte
+	var off, read, r = 0, 0, 0                    // offset to read
+	for i, si, n = 0, 0, len(files); i < n; i++ { // si is the split index
+		fHandle, err = os.Open(files[i])
+		if err != nil {
+			return
+		} else {
+			defer fHandle.Close()
+		}
+		// Read chunkS bytes into splits[i]
+	tryAgain:
+		r, err = fHandle.ReadAt(b[read:chunkS], off) // Read chunkS bytes into b
+		off += r
+		read += r
+		switch {
+		case read < chunkS:
+			if err == io.EOF {
+				off = 0 // if the file is over, get ready for the next file
+				continue
+			} else {
+				goto tryAgain
+			}
+		case read > chunkS:
+			return // something really shitty happened here!
+		}
+		read = 0 // reset for reading the next chunk
+		// Create a temporary file for the split
+		splits = append(splits, path.Join(tmp, "split"+si))
+		splitN, err = &os.Create(splits[si])
+		if err != nil {
+			return
+		} else {
+			defer splitN.Close()
+		}
+		splitN.WriteAt(b, off)
+		err = splitN.Close()
+		if err != nil {
+			return
+		}
+		si++ // move onto the next split
 	}
-	return 0
-}
-
-func myTCPAddr() net.TCPAddr {
-	// Return own ip address used for the connections
-	return net.TCPAddr{}
+	err = nil
+	return
 }

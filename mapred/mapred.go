@@ -82,7 +82,7 @@ type Specs struct {
 // Represents a machine in the cluster
 type worker struct {
 	// The IP address of the host
-	Addr net.TCPAddr
+	Addr *net.TCPAddr
 	// Task assigned to the worker
 	task id
 	// RPC cient for communication
@@ -96,7 +96,7 @@ type MapTask struct {
 	// State of the task
 	state state
 	// Split assigned to this task - valid only if it is a map task.
-	split os.File
+	split string
 	// Same as R, used by map workers
 	r uint
 }
@@ -116,8 +116,41 @@ type Worker interface {
 	// the Intermediate key-value pairs for every key-value pair of MapInput through the channel
 	// returned by it.
 	Map(<-chan MapInput) (<-chan Intermediate, error)
+	// Partioning function to partition the intermediate key-value pairs into R space
+	Parition(Intermediate)
 	//Reduce is the reduce function which takes a channel of ReduceInput and an output channel to transfer
 	Reduce(<-chan ReduceInput) (<-chan id, error)
 }
 
+// Type used for providin services over rpc
 type Service struct{}
+
+// Converts a bool to int
+func bToi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func myTCPAddr() (a *net.TCPAddr, err error) {
+	// Return own ip address used for the connections by dialing to http://www.google.com
+	c, err := net.Dial("tcp", "google.com:80")
+	if err != nil {
+		return
+	}
+	host, p, err := net.SplitHostPort(c.LocalAddr().String())
+	if err != nil {
+		return
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return nil, fmt.Errorf("Invalid ip: %v", ip)
+	}
+	port, err := strconv.Atoi(p)
+	if err != nil {
+		return
+	}
+	a = &net.TCPAddr{IP: ip, Port: port}
+	return
+}

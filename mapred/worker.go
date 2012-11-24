@@ -10,9 +10,13 @@ import (
 
 // Asks wether the host is willing to work on a mapreduce task. It replies yes only if it is idle.
 // The first argument is the tcp address of the master. The second arguement contains the reply.
-func (w *Service) Idle(ip net.TCPAddr, reply *bool) error {
+func (s *Service) Idle(ip net.TCPAddr, reply *bool) error {
 	*reply = task == nil
 	return nil
+}
+
+func (s *Service) Map(t MapTask, reply *bool) error {
+
 }
 
 func Start(worker *Worker) error {
