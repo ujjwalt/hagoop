@@ -13,9 +13,6 @@ import (
 // State of a worker
 type state int
 
-// Type of this host
-type wType int
-
 // State of a host
 const (
 	idle state = iota
@@ -88,25 +85,6 @@ type ReduceTask struct {
 	// State of the task
 	state state
 }
-
-// Worker is an inteface that defines the behaviour required by the application.
-// It is important that these methods are defined on a pointer for the rpc mechanism to work.
-// A Worker object is passed to Start() to start providing the service
-type Worker interface {
-	// Read takes as input a byte slice, converts it into a MapInput and returns it back
-	Read([]byte) (MapInput, error)
-	// Map is the map function which takes a channel of MapInput and emits
-	// the Intermediate key-value pairs for every key-value pair of MapInput through the channel
-	// returned by it.
-	Map(<-chan MapInput) (<-chan Intermediate, error)
-	// Partioning function to partition the intermediate key-value pairs into R space
-	Parition(Intermediate)
-	//Reduce is the reduce function which takes a channel of ReduceInput and an output channel to transfer
-	Reduce(<-chan ReduceInput) (<-chan id, error)
-}
-
-// Id of a worker. Used for idenitfying each host
-type wID int
 
 // Type used for providin services over rpc
 type Service struct{}
