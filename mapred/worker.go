@@ -8,9 +8,41 @@ import (
 	"net/rpc"
 )
 
+// Type of this worker
+const (
+	master wType = iota
+	mapper
+	reducer
+)
+
+// Services provided by a worker
+const (
+	port          = ":2607" // All communication happens over this port
+	idleService   = "Service.Idle"
+	MapService    = "Service.Map"
+	ReduceService = "Service.Reduce"
+)
+
+var (
+	started    bool         // Indicates wether the service has staretd
+	l          net.Listener // The service listener
+	masterAddr net.TCPAddr  // Address of the master
+	task       id           // Current task
+	w          *Worker      //The object to use as worker
+	id         wID          // ID of this worker
+)
+
+// Arguemnts to the idle service
+type idleArgs struct {
+	master net.TCPAddr // Address of master
+	id     wID         // ID assigned to the worker if it agrees to work
+}
+
 // Asks wether the host is willing to work on a mapreduce task. It replies yes only if it is idle.
 // The first argument is the tcp address of the master. The second arguement contains the reply.
-func (s *Service) Idle(ip net.TCPAddr, reply *bool) error {
+func (s *Service) Idle(arg idleArgs, reply *bool) error {
+	masterAddr = arg.master
+	id = arg.id
 	*reply = task == nil
 	return nil
 }
