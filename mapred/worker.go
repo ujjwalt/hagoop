@@ -1,4 +1,3 @@
-// Represents a worker on a host machine that provides services for doing map and reduce work
 package mapred
 
 import (
@@ -30,9 +29,9 @@ var (
 	started    bool         // Indicates wether the service has staretd
 	l          net.Listener // The service listener
 	masterAddr net.TCPAddr  // Address of the master
-	task       id           // Current task
+	task       Id           // Current task
 	w          *Worker      //The object to use as worker
-	id         wID          // ID of this worker
+	myID       wID          // ID of this worker
 )
 
 // Worker is an inteface that defines the behaviour required by the application.
@@ -48,7 +47,7 @@ type Worker interface {
 	// Partioning function to partition the intermediate key-value pairs into R space
 	Parition(Intermediate)
 	//Reduce is the reduce function which takes a channel of ReduceInput and an output channel to transfer
-	Reduce(<-chan ReduceInput) (<-chan id, error)
+	Reduce(<-chan ReduceInput) (<-chan Id, error)
 }
 
 // Id of a worker. Used for idenitfying each host
@@ -57,28 +56,29 @@ type wID int
 // Arguemnts to the idle service
 type idleArgs struct {
 	master net.TCPAddr // Address of master
-	id     wID         // ID assigned to the worker if it agrees to work
+	yourID wID         // ID assigned to the worker if it agrees to work
 }
 
 // Asks wether the host is willing to work on a mapreduce task. It replies yes only if it is idle.
 // The first argument is the tcp address of the master. The second arguement contains the reply.
 func (s *Service) Idle(arg idleArgs, reply *bool) error {
 	masterAddr = arg.master
-	id = arg.id
+	myID = arg.yourID
 	*reply = task == nil
 	return nil
 }
 
 func (s *Service) Map(t MapTask, reply *bool) error {
-
+	return nil
 }
 
+// Star a worker to accept work from some master
 func Start(worker *Worker) error {
 	// Check if the service is already running or not
 	if started {
 		return errors.New("Service has already been started. Use Stop() to stop the service.")
 	}
-	rpc.Register(&service{})
+	rpc.Register(&Service{})
 	rpc.HandleHTTP()
 	var e error
 	l, e = net.Listen("tcp", port)
@@ -91,6 +91,7 @@ func Start(worker *Worker) error {
 	return nil
 }
 
+// Stop the services of a worker
 func Stop() error {
 	started = false
 	return l.Close()
