@@ -267,8 +267,7 @@ func split(chunkS int64, files []string) ([]string, error) {
 		read = 0 // reset for reading the next chunk
 		// Create a temporary file for the split
 		splits = append(splits, path.Join(tmp, "split"+strconv.Itoa(si)))
-		var splitN *os.File
-		splitN, err = os.Create(splits[si])
+		splitN, err := os.Create(splits[si])
 		if err != nil {
 			return splits, err
 		} else {
