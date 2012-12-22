@@ -19,19 +19,19 @@ const (
 
 // Services provided by a worker
 const (
-	port          = ":2607" // All communication happens over this port
-	idleService   = "Service.Idle"
-	MapService    = "Service.Map"
-	ReduceService = "Service.Reduce"
+	port            = ":2607" // All communication happens over this port
+	idleService     = "Service.Idle"
+	mapService      = "Service.Map"
+	reduceService   = "Service.Reduce"
+	iAmAliveService = "Service.IAmAlive"
 )
 
 var (
-	started    bool         // Indicates wether the service has staretd
-	l          net.Listener // The service listener
-	masterAddr net.TCPAddr  // Address of the master
-	task       Id           // Current task
-	w          *Worker      //The object to use as worker
-	myID       wID          // ID of this worker
+	started    bool        // Indicates wether the service has staretd
+	masterAddr net.TCPAddr // Address of the master
+	task       Id          // Current task
+	w          *Worker     //The object to use as worker
+	myID       wID         // ID of this worker
 )
 
 // Worker is an inteface that defines the behaviour required by the application.
@@ -68,7 +68,7 @@ func (s *Service) Idle(arg idleArgs, reply *bool) error {
 	return nil
 }
 
-func (s *Service) Map(t MapTask, reply *bool) error {
+func (s *Service) Map(t task, reply *bool) error {
 	return nil
 }
 
@@ -80,8 +80,7 @@ func Start(worker *Worker) error {
 	}
 	rpc.Register(&Service{})
 	rpc.HandleHTTP()
-	var e error
-	l, e = net.Listen("tcp", port)
+	l, e := net.Listen("tcp", port)
 	if e != nil {
 		return e
 	}
