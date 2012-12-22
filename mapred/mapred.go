@@ -28,31 +28,31 @@ const (
 
 // Renaming the generic type - id from Objective-C.
 // This is only for less typing - lazy me!
-type Id interface{}
+// type Id interface{}
 
 // Give input as a map instead of individual key-value pairs to reduce the overhead of function calls
 // and accomodate as many key-value pairs as possible in a single function call. How many? That's left
 // to the user to decide.
-type MapInput map[Id]Id
+type MapInput map[interface{}]interface{}
 
 // Result of the mapreduce result - same as MapInput
 type MapReduceResult MapInput
 
 // Intermediate key-value pairs that are emitted
 type Intermediate struct {
-	Key, Value Id
+	Key, Value interface{}
 }
 
 // We use a channel to be able to iterate over the values as and when they are available. This allows
 // very large lists to be handled since only as many items are sent through the channel as can fit in memory.
-type ReduceInput map[Id]chan Id
+type ReduceInput map[interface{}]chan interface{}
 
 // The mapreduce specification object
 type Specs struct {
 	// A slice of input and output file paths
 	InputFiles, OutputFiles []string
 	// Total number of mappers and reducers to use
-	M, R int
+	M, R int64
 	// The length of this slice should be >= M+R
 	Workers []worker
 }
@@ -70,7 +70,7 @@ type worker struct {
 	// RPC cient for communication
 	// client *rpc.Client
 	// Answers to queries
-	ans map[Id]Id // TODO type needs to be changed later
+	ans map[interface{}]interface{} // TODO type needs to be changed later
 }
 
 // Task consists of the current state of the task, the split assigned to it if it is a map task
@@ -82,7 +82,7 @@ type task struct {
 }
 
 // Type used for providin services over rpc
-type Service struct{}
+type Master struct{}
 
 // The MapReduce() call that triggers off the magic
 func MapReduce(specs Specs) (result MapReduceResult, err error) {
@@ -98,18 +98,18 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 
 	// Determine the total size of the all input files and start splitting it. Assign each split to a worker as a map task
 	// and assign a reduce task to the rest of the workers in a ratio of M:R
-	totalWorkers := len(specs.Workers)                           // total workers
-	clients := make([]*rpc.Client, totalWorkers)                 // clients returned by rpc calls
-	splitsIndex, err := split(specs.ChunkSize, specs.InputFiles) // Splits of files
+	totalWorkers := int64(len(specs.Workers))            // total workers
+	clients := make([]*rpc.Client, totalWorkers)         // clients returned by rpc calls
+	splitsIndex, err := split(specs.M, specs.InputFiles) // Splits of files
 	if err != nil {
 		return
 	}
-	calls := make([]*rpc.Call, totalWorkers)   // calls returned by rpc calls
-	unit := totalWorkers / (specs.M + specs.R) // unit worker for ratios
-	ans := make([]bool, totalWorkers)          // answers received from machines wether they are idle or not?
-	m := int(unit * specs.M)                   // number of map workers
-	r := totalWorkers - m                      // number of reduce workers
-	dialFailures := 0                          // number of dial failures - max limit is
+	calls := make([]*rpc.Call, totalWorkers)      // calls returned by rpc calls
+	unit := totalWorkers / int64(specs.M+specs.R) // unit worker for ratios
+	ans := make([]bool, totalWorkers)             // answers received from machines wether they are idle or not?
+	m := int(unit * specs.M)                      // number of map workers
+	r := totalWorkers - m                         // number of reduce workers
+	dialFailures := int64(0)                      // number of dial failures - max limit is
 	myAddr, err := myTCPAddr()
 	if err != nil {
 		return
@@ -179,25 +179,24 @@ func MapReduce(specs Specs) (result MapReduceResult, err error) {
 	}
 
 	// Assign task to each mapworker and ask it to perform it
-	for i, mw := range mapWorkers {
-		mw.task.split = path.Join(tmp, "split"+strconv.Itoa(si))
-		calls[i] = mw.client.Go(mapService, mw.task, nil, nil) // Ask to do the map work
+	for i := range specs.M {
+		mapWorkers[i].task.split = path.Join(tmp, "split"+strconv.Itoa(i))
+		mapWorkers[i].client.Go(mapService, mapWorkers[i].task, nil, nil) // Ask to do the map work
+
 	}
 
 	// Wait for all tasks to complete and keep assigning the next job to the next idle worker
-	for i := 0; true; i = (i + 1) % m {
-		select {
-		case <-calls[i].Done:
-			b := make([]byte, splits[aw].Stat().Size()) // The contents of file
-			_, err = splits[aw].Read(b)
-			if err != nil {
-				return
-			}
-			specs.Workers[i].task = &task{b, specs.R} // Setup the worker
-			mapWorkers[aw] = &specs.Workers[i]        // Assign reference to mapWorkers
-			aw++
-		default: // keep polling
+	nextM := m
+	select {
+	case finishedWorker := <-taskCompleted:
+		// assign a fresh task
+		if nextI >= specs.M {
+			break // stop polling if all jobs have finished
 		}
+		mapWorkers[finishedWorker].task.split = path.Join(tmp, "split"+strconv.Itoa(nextI)) // assign next split
+		mapWorkers[finishedWorker].client.Go(mapService, mapWorkers[i].task, nil, nil)      // Ask to do the map work
+	default:
+		continue // keep polling
 	}
 
 	err = nil // Reset err
@@ -216,13 +215,25 @@ func validateSpecs(specs Specs) error {
 	return nil
 }
 
+var taskCompleted chan int
+
 // Singals a task completed
-func (s *Service) TaskCompleted() {
+func (s *Master) TaskCompleted() error {
 
 }
 
-func (s *Service) IAmAlive(id wID, null *int) {
+func (s *Master) IAmAlive(id wID, null *int) error {
 
+}
+
+func (s *Master) Split(i int, b *[]byte) error {
+	f, err := os.Open(path.Join(tmp, "split"+strconv.Itoa(i)))
+	if err != nil {
+		return err
+	}
+	f.Read(*b)
+	f.Close()
+	return nil
 }
 
 // Utilities
@@ -237,18 +248,19 @@ func setUpMasterServices() error {
 	return nil
 }
 
+var tmp = path.Join(os.TempDir(), "github.com", "ujjwalt", "hagoop")
+
 // Split files into chunks of size chunkS and return the file handles
 func split(m int64, files []string) ([]int, error) {
 	// name each intermediate file based on the hash of the contents of the input file
-	var splits []string
-	tmp := path.Join(os.TempDir(), "github.com", "ujjwalt", "hagoop")
+	var splits []int
 	// determine chunkS
 	var chunkS int64 = 0
 	fileHandles := make([]*os.File, len(files))
 	for i, fn := range files {
 		fileHadles[i], err = os.Open(fn)
 		if err != nil {
-			return
+			return nil, err
 		}
 		defer fileHandles[i].Close()
 		chunkS += fileHandles[i].Stat().Size()

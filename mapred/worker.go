@@ -20,18 +20,19 @@ const (
 // Services provided by a worker
 const (
 	port            = ":2607" // All communication happens over this port
-	idleService     = "Service.Idle"
-	mapService      = "Service.Map"
-	reduceService   = "Service.Reduce"
-	iAmAliveService = "Service.IAmAlive"
+	idleService     = "Worker.Idle"
+	mapService      = "Worker.Map"
+	reduceService   = "Master.Reduce"
+	iAmAliveService = "Master.IAmAlive"
+	getSplit        = "Master.GetSplit"
 )
 
 var (
-	started    bool        // Indicates wether the service has staretd
-	masterAddr net.TCPAddr // Address of the master
-	task       Id          // Current task
-	w          *Worker     //The object to use as worker
-	myID       wID         // ID of this worker
+	started     bool        // Indicates wether the service has staretd
+	masterAddr  net.TCPAddr // Address of the master
+	currentTask task        // Current task
+	w           *Worker     //The object to use as worker
+	myID        wID         // ID of this worker
 )
 
 // Worker is an inteface that defines the behaviour required by the application.
@@ -47,7 +48,7 @@ type Worker interface {
 	// Partioning function to partition the intermediate key-value pairs into R space
 	Parition(Intermediate)
 	//Reduce is the reduce function which takes a channel of ReduceInput and an output channel to transfer
-	Reduce(<-chan ReduceInput) (<-chan Id, error)
+	Reduce(<-chan ReduceInput) (<-chan interface{}, error)
 }
 
 // Id of a worker. Used for idenitfying each host
@@ -59,6 +60,8 @@ type idleArgs struct {
 	yourID wID         // ID assigned to the worker if it agrees to work
 }
 
+type Service struct{}
+
 // Asks wether the host is willing to work on a mapreduce task. It replies yes only if it is idle.
 // The first argument is the tcp address of the master. The second arguement contains the reply.
 func (s *Service) Idle(arg idleArgs, reply *bool) error {
@@ -68,7 +71,7 @@ func (s *Service) Idle(arg idleArgs, reply *bool) error {
 	return nil
 }
 
-func (s *Service) Map(t task, reply *bool) error {
+func (s *Worker) Map(t task, reply *bool) error {
 	return nil
 }
 
@@ -78,7 +81,7 @@ func Start(worker *Worker) error {
 	if started {
 		return errors.New("Service has already been started. Use Stop() to stop the service.")
 	}
-	rpc.Register(&Service{})
+	rpc.RegisterName("Worker", &Service{})
 	rpc.HandleHTTP()
 	l, e := net.Listen("tcp", port)
 	if e != nil {
